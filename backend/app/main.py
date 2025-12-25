@@ -1,0 +1,241 @@
+from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app import models, schemas, crud
+from app.database import engine, get_db
+
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="ScoutOps API", version="1.0.0")
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to ScoutOps API"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+# Player endpoints
+@app.post("/api/players", response_model=schemas.PlayerResponse, status_code=201)
+async def create_player(
+    player: schemas.PlayerCreate,
+    db: Session = Depends(get_db)
+):
+    return crud.create_player(db=db, player=player)
+
+
+@app.get("/api/players", response_model=List[schemas.PlayerResponse])
+async def list_players(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    team: Optional[str] = Query(None),
+    position: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    players = crud.get_players(
+        db=db,
+        skip=skip,
+        limit=limit,
+        search=search,
+        team=team,
+        position=position
+    )
+    return players
+
+
+@app.get("/api/players/{player_id}", response_model=schemas.PlayerDetailResponse)
+async def get_player(
+    player_id: int,
+    db: Session = Depends(get_db)
+):
+    player = crud.get_player(db=db, player_id=player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return player
+
+
+@app.put("/api/players/{player_id}", response_model=schemas.PlayerResponse)
+async def update_player(
+    player_id: int,
+    player: schemas.PlayerUpdate,
+    db: Session = Depends(get_db)
+):
+    updated_player = crud.update_player(db=db, player_id=player_id, player=player)
+    if not updated_player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return updated_player
+
+
+@app.delete("/api/players/{player_id}", status_code=204)
+async def delete_player(
+    player_id: int,
+    db: Session = Depends(get_db)
+):
+    success = crud.delete_player(db=db, player_id=player_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+
+# Note endpoints
+@app.post("/api/notes", response_model=schemas.NoteResponse, status_code=201)
+async def create_note(
+    note: schemas.NoteCreate,
+    db: Session = Depends(get_db)
+):
+    # Verify player exists
+    player = crud.get_player(db=db, player_id=note.player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return crud.create_note(db=db, note=note)
+
+
+@app.get("/api/notes", response_model=List[schemas.NoteResponse])
+async def list_notes(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    player_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    is_important: Optional[bool] = Query(None),
+    db: Session = Depends(get_db)
+):
+    notes = crud.get_notes(
+        db=db,
+        skip=skip,
+        limit=limit,
+        player_id=player_id,
+        search=search,
+        tag=tag,
+        is_important=is_important
+    )
+    return notes
+
+
+@app.get("/api/notes/{note_id}", response_model=schemas.NoteResponse)
+async def get_note(
+    note_id: int,
+    db: Session = Depends(get_db)
+):
+    note = crud.get_note(db=db, note_id=note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return note
+
+
+@app.put("/api/notes/{note_id}", response_model=schemas.NoteResponse)
+async def update_note(
+    note_id: int,
+    note: schemas.NoteUpdate,
+    db: Session = Depends(get_db)
+):
+    updated_note = crud.update_note(db=db, note_id=note_id, note=note)
+    if not updated_note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return updated_note
+
+
+@app.delete("/api/notes/{note_id}", status_code=204)
+async def delete_note(
+    note_id: int,
+    db: Session = Depends(get_db)
+):
+    success = crud.delete_note(db=db, note_id=note_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+
+# Seed endpoint (optional)
+@app.post("/api/seed")
+async def seed_data(db: Session = Depends(get_db)):
+    # Check if data already exists
+    existing_players = crud.get_players(db=db, limit=1)
+    if existing_players:
+        return {"message": "Database already contains data"}
+
+    # Create sample players
+    sample_players = [
+        {
+            "name": "Stephen Curry",
+            "position": "Point Guard",
+            "team": "Golden State Warriors",
+            "jersey_number": 30,
+            "height": "6'2\"",
+            "weight": "185 lbs",
+            "age": 35
+        },
+        {
+            "name": "LeBron James",
+            "position": "Small Forward",
+            "team": "Los Angeles Lakers",
+            "jersey_number": 23,
+            "height": "6'9\"",
+            "weight": "250 lbs",
+            "age": 39
+        },
+        {
+            "name": "Kevin Durant",
+            "position": "Small Forward",
+            "team": "Phoenix Suns",
+            "jersey_number": 35,
+            "height": "6'10\"",
+            "weight": "240 lbs",
+            "age": 35
+        }
+    ]
+
+    created_players = []
+    for player_data in sample_players:
+        player = crud.create_player(db=db, player=schemas.PlayerCreate(**player_data))
+        created_players.append(player)
+
+    # Create sample notes
+    sample_notes = [
+        {
+            "player_id": created_players[0].id,
+            "title": "Exceptional 3-point shooting",
+            "content": "Curry demonstrated incredible range and accuracy from beyond the arc. Made 7/10 three-pointers with defenders in his face.",
+            "tags": "shooting, offense, clutch",
+            "game_date": "2024-01-15",
+            "is_important": True
+        },
+        {
+            "player_id": created_players[0].id,
+            "title": "Ball handling under pressure",
+            "content": "Showed elite ball handling skills when double-teamed. Able to create space and find open teammates.",
+            "tags": "playmaking, ball-handling",
+            "game_date": "2024-01-15",
+            "is_important": False
+        },
+        {
+            "player_id": created_players[1].id,
+            "title": "Leadership and court vision",
+            "content": "LeBron's basketball IQ was on full display. Made several key passes that led to easy buckets. Vocal leader on both ends.",
+            "tags": "leadership, playmaking, IQ",
+            "game_date": "2024-01-16",
+            "is_important": True
+        }
+    ]
+
+    for note_data in sample_notes:
+        crud.create_note(db=db, note=schemas.NoteCreate(**note_data))
+
+    return {
+        "message": "Database seeded successfully",
+        "players_created": len(created_players),
+        "notes_created": len(sample_notes)
+    }
