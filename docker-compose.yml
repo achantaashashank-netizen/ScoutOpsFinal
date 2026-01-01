@@ -27,7 +27,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:Fallintake%232022@db:5432/Scout_OPS_db
       ENVIRONMENT: development
-      GOOGLE_API_KEY: AIzaSyDB-eBF1PVgIt6OYIeXTMX9cNzEJBojWkM
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       HF_HOME: /app/.cache/huggingface  # Cache HuggingFace models
     ports:
       - "8000:8000"

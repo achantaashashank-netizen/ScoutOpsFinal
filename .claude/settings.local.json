@@ -14,7 +14,10 @@
       "Bash(docker-compose logs:*)",
       "Bash(docker-compose up:*)",
       "Bash(docker-compose ps:*)",
-      "Bash(docker-compose restart:*)"
+      "Bash(docker-compose restart:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(curl:*)",
+      "Bash(timeout 60 docker-compose logs:*)"
     ]
   }
 }

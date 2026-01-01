@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     generation_model: str = "models/gemini-2.5-flash"
 
     class Config:
-        env_file = ".env"
+        env_file = "../.env"  # Read from root directory
 
 
 @lru_cache()
