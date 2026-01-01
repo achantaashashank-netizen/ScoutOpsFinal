@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, func
 from typing import List, Optional
 from app import models, schemas
+from app.rag.embeddings import generate_embedding, generate_text_searchable
 
 
 # Player CRUD operations
@@ -101,6 +102,18 @@ def get_notes(
 
 def create_note(db: Session, note: schemas.NoteCreate):
     db_note = models.Note(**note.model_dump())
+
+    # Week 2: Generate embeddings and text_searchable on creation
+    combined_text = f"{note.title} {note.content}"
+    if note.tags:
+        combined_text += f" {note.tags}"
+
+    db_note.embedding = generate_embedding(combined_text)
+    db_note.text_searchable = func.to_tsvector(
+        'english',
+        generate_text_searchable(note.title, note.content, note.tags or "")
+    )
+
     db.add(db_note)
     db.commit()
     db.refresh(db_note)
@@ -113,6 +126,19 @@ def update_note(db: Session, note_id: int, note: schemas.NoteUpdate):
         update_data = note.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_note, key, value)
+
+        # Week 2: Regenerate embeddings if content changed
+        if any(k in update_data for k in ['title', 'content', 'tags']):
+            combined_text = f"{db_note.title} {db_note.content}"
+            if db_note.tags:
+                combined_text += f" {db_note.tags}"
+
+            db_note.embedding = generate_embedding(combined_text)
+            db_note.text_searchable = func.to_tsvector(
+                'english',
+                generate_text_searchable(db_note.title, db_note.content, db_note.tags or "")
+            )
+
         db.commit()
         db.refresh(db_note)
     return db_note
