@@ -43,6 +43,14 @@ Scout_OPS_/
 - ✅ **Data Persistence**: PostgreSQL database with SQLAlchemy ORM
 - ✅ **Tests**: Comprehensive test suite for backend API
 
+### Week 2 - RAG System
+- ✅ **Hybrid Search**: Combines keyword (PostgreSQL tsvector) and semantic search (embeddings)
+- ✅ **AI-Powered Answers**: Google Gemini generates grounded answers with citations
+- ✅ **Citation System**: Every claim cited with [1], [2], etc.
+- ✅ **Semantic Embeddings**: all-MiniLM-L6-v2 for meaning-based search
+- ✅ **Confidence Scoring**: High/Medium/Low based on available information
+- ✅ **Interactive Citations**: Click citations to view source notes
+
 ## Tech Stack
 
 ### Backend
@@ -61,11 +69,66 @@ Scout_OPS_/
 
 ## Prerequisites
 
+### Option 1: Docker (Recommended)
+- Docker Desktop installed
+- Docker Compose installed
+
+### Option 2: Manual Setup
 - Python 3.9+
 - Node.js 18+
 - PostgreSQL 14+
 
-## Setup Instructions
+## Quick Start with Docker
+
+### Start Everything with One Command
+
+```bash
+# Navigate to project root
+cd Scout_OPS_
+
+# Start all services (database, backend, frontend)
+docker-compose up
+
+# Or run in background
+docker-compose up -d
+```
+
+This will start:
+- **PostgreSQL Database**: `localhost:5433`
+- **Backend API**: `http://localhost:8000` (API docs: `http://localhost:8000/docs`)
+- **Frontend**: `http://localhost:5173`
+
+### Stop All Services
+
+```bash
+docker-compose down
+
+# To also remove database data
+docker-compose down -v
+```
+
+### View Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f backend
+docker-compose logs -f frontend
+docker-compose logs -f db
+```
+
+### Seed Sample Data
+
+```bash
+# With Docker running
+curl -X POST http://localhost:8000/api/seed
+```
+
+Or visit http://localhost:8000/docs and use the `/api/seed` endpoint.
+
+## Manual Setup Instructions
 
 ### 1. Clone the Repository
 
@@ -183,6 +246,14 @@ pytest
 - `PUT /api/notes/{id}` - Update a note
 - `DELETE /api/notes/{id}` - Delete a note
 
+### RAG Endpoints (Week 2)
+- `POST /api/rag/retrieve` - Retrieve relevant notes using hybrid search
+- `POST /api/rag/generate` - Generate AI answer with citations
+
+### Utility
+- `POST /api/seed` - Seed database with sample data
+- `GET /health` - Health check
+
 ### Query Parameters
 - **Players**: `?search=curry&team=warriors&position=guard`
 - **Notes**: `?player_id=1&search=shooting&tag=offense&is_important=true`
@@ -211,6 +282,38 @@ pytest
 - `is_important` (Boolean)
 - `created_at` (DateTime)
 - `updated_at` (DateTime)
+- `embedding` (ARRAY, Week 2) - 384-dimensional vector for semantic search
+- `text_searchable` (tsvector, Week 2) - PostgreSQL full-text search index
+
+## RAG System Architecture (Week 2)
+
+### How It Works
+
+1. **Hybrid Retrieval**:
+   - Keyword Search: PostgreSQL tsvector with ts_rank scoring (40% weight)
+   - Semantic Search: Cosine similarity with embeddings (60% weight)
+   - Combines both scores to find most relevant notes
+
+2. **Embeddings**:
+   - Model: all-MiniLM-L6-v2 (384 dimensions)
+   - Generated automatically when notes are created/updated
+   - Stored as PostgreSQL REAL[] arrays (no pgvector required)
+
+3. **Answer Generation**:
+   - Uses Google Gemini (models/gemini-2.5-flash)
+   - Temperature: 0.3 (factual responses)
+   - Grounded in retrieved notes only (no hallucination)
+   - Every claim cited with [1], [2], etc.
+
+4. **Citation System**:
+   - Citations extracted from answer using regex
+   - Linked back to original note IDs
+   - Interactive UI allows clicking citations to view sources
+
+5. **Confidence Assessment**:
+   - **High**: 3+ citations from 3+ notes
+   - **Medium**: 1-2 citations
+   - **Low**: No citations or insufficient information detected
 
 ## Development
 
@@ -225,22 +328,42 @@ pytest
 
 ## Troubleshooting
 
-### Database Connection Issues
+### Docker Issues
+- **Cannot connect to Docker daemon**: Ensure Docker Desktop is running
+- **Port already in use**: Check if ports 5173, 8000, 5433 are available
+- **Build errors**: Try `docker-compose down -v && docker-compose up --build`
+- **Database not initializing**: Run `docker-compose down -v` to reset volumes
+
+### Backend Won't Start
+- Check if PostgreSQL is running
+- Verify DATABASE_URL in .env
+- Ensure all Python dependencies installed
+- Check backend logs: `docker-compose logs backend`
+
+### Frontend Won't Connect to Backend
+- Check if backend is running on port 8000
+- Verify VITE_API_URL in frontend/.env
+- Check browser console for CORS errors
+- Clear browser cache and reload
+
+### RAG Not Working
+- Verify GOOGLE_API_KEY is set correctly in .env
+- Check if embeddings are generated (run backfill script)
+- Ensure database migration ran: `python scripts/add_rag_columns_simple.py`
+- Check Gemini model name is correct: `models/gemini-2.5-flash`
+
+### Database Connection Issues (Manual Setup)
 - Verify PostgreSQL is running: `pg_isready`
 - Check database credentials in `.env`
 - Ensure database exists: `psql -l`
 
-### Port Already in Use
+### Port Already in Use (Manual Setup)
 - Backend (8000): Change port in uvicorn command
-- Frontend (3000): Change port in `vite.config.ts`
+- Frontend (5173): Change port in `vite.config.ts`
 
 ### Module Not Found
 - Backend: Ensure virtual environment is activated
 - Frontend: Run `npm install`
-
-## Future Enhancements (Week 2 & 3)
-- Week 2: Knowledge & Retrieval (RAG)
-- Week 3: In-App AI Assistant
 
 ## License
 

@@ -1,0 +1,69 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: scoutops_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Fallintake#2022
+      POSTGRES_DB: Scout_OPS_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: scoutops-backend:latest
+    container_name: scoutops_backend
+    environment:
+      DATABASE_URL: postgresql://postgres:Fallintake%232022@db:5432/Scout_OPS_db
+      ENVIRONMENT: development
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      HF_HOME: /app/.cache/huggingface  # Cache HuggingFace models
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/venv  # Prevent local venv from being mounted
+      - huggingface_cache:/app/.cache/huggingface  # Persist model cache
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "
+        python scripts/add_rag_columns_simple.py || true &&
+        python scripts/warmup_model.py &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: scoutops-frontend:latest
+    container_name: scoutops_frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Prevent local node_modules from being mounted
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  huggingface_cache:

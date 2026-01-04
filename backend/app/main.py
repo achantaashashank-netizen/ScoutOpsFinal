@@ -5,6 +5,16 @@ from typing import List, Optional
 from app import models, schemas, crud
 from app.database import engine, get_db
 
+# Week 2: RAG imports
+from app.rag import generation
+from app.rag.schemas import (
+    RetrievalRequest,
+    RetrievalResponse,
+    GenerationRequest,
+    GenerationResponse
+)
+from app.rag.retrieval import retrieve_notes
+
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="ScoutOps API", version="1.0.0")
@@ -239,3 +249,51 @@ async def seed_data(db: Session = Depends(get_db)):
         "players_created": len(created_players),
         "notes_created": len(sample_notes)
     }
+
+
+# Week 2: RAG endpoints
+@app.post("/api/rag/retrieve", response_model=RetrievalResponse)
+async def retrieve_notes_endpoint(
+    request: RetrievalRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve relevant notes using hybrid search (keyword + semantic).
+    Returns ranked snippets with provenance metadata.
+    """
+    results = retrieve_notes(
+        query=request.query,
+        db=db,
+        player_id=request.player_id,
+        team=request.team,
+        top_k=request.top_k,
+        keyword_weight=request.keyword_weight or 0.4,
+        semantic_weight=request.semantic_weight or 0.6
+    )
+
+    return RetrievalResponse(
+        query=request.query,
+        results=results,
+        total_results=len(results)
+    )
+
+
+@app.post("/api/rag/generate", response_model=GenerationResponse)
+async def generate_answer_endpoint(
+    request: GenerationRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate grounded answer with citations using Google Gemini.
+    Returns answer, citations, and confidence assessment.
+    """
+    response = generation.generate_answer(
+        query=request.query,
+        db=db,
+        player_id=request.player_id,
+        team=request.team,
+        top_k=request.top_k,
+        include_retrieval=request.include_retrieval
+    )
+
+    return response
