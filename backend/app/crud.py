@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from typing import List, Optional
 from app import models, schemas
-from app.rag.embeddings import generate_embedding, generate_text_searchable
+from app.rag.embeddings import generate_text_searchable, store_note_embedding
+from app.rag.vector_store import delete_note_embedding
 
 
 # Player CRUD operations
@@ -59,8 +60,20 @@ def update_player(db: Session, player_id: int, player: schemas.PlayerUpdate):
 def delete_player(db: Session, player_id: int):
     db_player = get_player(db, player_id)
     if db_player:
+        # Get all note IDs for this player (to delete from Qdrant)
+        note_ids = [note.id for note in db_player.notes]
+
+        # Delete player from PostgreSQL (cascades to notes)
         db.delete(db_player)
         db.commit()
+
+        # Delete associated note embeddings from Qdrant
+        for note_id in note_ids:
+            try:
+                delete_note_embedding(note_id)
+            except Exception as e:
+                print(f"Warning: Failed to delete embedding from Qdrant for note {note_id}: {e}")
+
         return True
     return False
 
@@ -103,12 +116,7 @@ def get_notes(
 def create_note(db: Session, note: schemas.NoteCreate):
     db_note = models.Note(**note.model_dump())
 
-    # Week 2: Generate embeddings and text_searchable on creation
-    combined_text = f"{note.title} {note.content}"
-    if note.tags:
-        combined_text += f" {note.tags}"
-
-    db_note.embedding = generate_embedding(combined_text)
+    # Week 2: Generate text_searchable for keyword search (PostgreSQL)
     db_note.text_searchable = func.to_tsvector(
         'english',
         generate_text_searchable(note.title, note.content, note.tags or "")
@@ -117,6 +125,13 @@ def create_note(db: Session, note: schemas.NoteCreate):
     db.add(db_note)
     db.commit()
     db.refresh(db_note)
+
+    # Store embedding in Qdrant vector database
+    try:
+        store_note_embedding(db_note, db)
+    except Exception as e:
+        print(f"Warning: Failed to store embedding in Qdrant for note {db_note.id}: {e}")
+
     return db_note
 
 
@@ -127,13 +142,9 @@ def update_note(db: Session, note_id: int, note: schemas.NoteUpdate):
         for key, value in update_data.items():
             setattr(db_note, key, value)
 
-        # Week 2: Regenerate embeddings if content changed
+        # Week 2: Regenerate text_searchable and embeddings if content changed
         if any(k in update_data for k in ['title', 'content', 'tags']):
-            combined_text = f"{db_note.title} {db_note.content}"
-            if db_note.tags:
-                combined_text += f" {db_note.tags}"
-
-            db_note.embedding = generate_embedding(combined_text)
+            # Update PostgreSQL full-text search
             db_note.text_searchable = func.to_tsvector(
                 'english',
                 generate_text_searchable(db_note.title, db_note.content, db_note.tags or "")
@@ -141,13 +152,29 @@ def update_note(db: Session, note_id: int, note: schemas.NoteUpdate):
 
         db.commit()
         db.refresh(db_note)
+
+        # Update embedding in Qdrant if content changed
+        if any(k in update_data for k in ['title', 'content', 'tags']):
+            try:
+                store_note_embedding(db_note, db)
+            except Exception as e:
+                print(f"Warning: Failed to update embedding in Qdrant for note {db_note.id}: {e}")
+
     return db_note
 
 
 def delete_note(db: Session, note_id: int):
     db_note = get_note(db, note_id)
     if db_note:
+        # Delete from PostgreSQL
         db.delete(db_note)
         db.commit()
+
+        # Delete from Qdrant vector database
+        try:
+            delete_note_embedding(note_id)
+        except Exception as e:
+            print(f"Warning: Failed to delete embedding from Qdrant for note {note_id}: {e}")
+
         return True
     return False

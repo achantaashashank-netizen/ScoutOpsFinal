@@ -1,7 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import json
+from datetime import datetime
 from app import models, schemas, crud
 from app.database import engine, get_db
 
@@ -297,3 +300,135 @@ async def generate_answer_endpoint(
     )
 
     return response
+
+
+# Week 3: AI Assistant endpoints
+@app.post("/api/assistant/conversations", response_model=schemas.ConversationResponse, status_code=201)
+async def create_conversation(db: Session = Depends(get_db)):
+    """Create a new conversation with the AI assistant"""
+    conversation = models.Conversation()
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+@app.get("/api/assistant/conversations", response_model=List[schemas.ConversationResponse])
+async def list_conversations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """List all conversations"""
+    conversations = (
+        db.query(models.Conversation)
+        .order_by(models.Conversation.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return conversations
+
+
+@app.get("/api/assistant/conversations/{conversation_id}", response_model=schemas.ConversationResponse)
+async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    """Get a specific conversation with all its runs"""
+    conversation = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return conversation
+
+
+@app.post("/api/assistant/chat")
+async def chat_with_assistant(
+    request: schemas.ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Chat with the AI assistant using Server-Sent Events for real-time updates.
+    Returns a stream of events showing the assistant's progress.
+    """
+    from app.assistant.agent import AssistantAgent
+
+    # Get or create conversation
+    conversation_id = request.conversation_id
+    if conversation_id:
+        conversation = db.query(models.Conversation).filter(
+            models.Conversation.id == conversation_id
+        ).first()
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        # Create new conversation
+        conversation = models.Conversation()
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+    # Create a new run
+    run = models.Run(
+        conversation_id=conversation.id,
+        user_message=request.message,
+        status="running"
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    # Cache IDs before closing the session
+    run_id = run.id
+    conv_id = conversation.id
+
+    # Update conversation timestamp
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+
+    async def event_generator():
+        """Generate Server-Sent Events for the assistant's progress"""
+        try:
+            # Send initial event with run info
+            yield f"data: {json.dumps({'type': 'run_started', 'run_id': run_id, 'conversation_id': conv_id})}\n\n"
+
+            # Create and run the agent (it will manage its own database session)
+            agent = AssistantAgent(run_id=run_id, max_iterations=10)
+
+            # Stream progress updates
+            for update in agent.run_agent():
+                yield f"data: {json.dumps(update)}\n\n"
+
+            # Send completion event
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as e:
+            # Send error event
+            error_data = {
+                "type": "error",
+                "error": str(e),
+                "status": "failed"
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.get("/api/assistant/runs/{run_id}", response_model=schemas.RunResponse)
+async def get_run(run_id: int, db: Session = Depends(get_db)):
+    """Get a specific run with all its steps"""
+    run = db.query(models.Run).filter(models.Run.id == run_id).first()
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    return run

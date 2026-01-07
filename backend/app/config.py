@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     semantic_weight: float = 0.6
     generation_model: str = "models/gemini-2.5-flash"
 
+    # Qdrant vector database settings
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection_name: str = "scout_notes"
+    qdrant_vector_size: int = 384  # all-MiniLM-L6-v2 embedding size
+
     class Config:
         env_file = "../.env"  # Read from root directory
 

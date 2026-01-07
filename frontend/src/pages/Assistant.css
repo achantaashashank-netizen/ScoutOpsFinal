@@ -1,0 +1,11 @@
+.assistant-page {
+  min-height: calc(100vh - 200px);
+  padding: 2rem 0;
+}
+
+.assistant-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  height: calc(100vh - 250px);
+  min-height: 600px;
+}

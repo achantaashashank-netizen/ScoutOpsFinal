@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import PlayerList from './pages/PlayerList'
 import PlayerDetail from './pages/PlayerDetail'
 import AskScoutOps from './pages/AskScoutOps'
+import Assistant from './pages/Assistant'
 import './App.css'
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
           <Route path="/" element={<PlayerList />} />
           <Route path="/players/:id" element={<PlayerDetail />} />
           <Route path="/ask" element={<AskScoutOps />} />
+          <Route path="/assistant" element={<Assistant />} />
         </Routes>
       </Layout>
     </Router>

@@ -73,3 +73,50 @@ class PlayerDetailResponse(PlayerResponse):
 
     class Config:
         from_attributes = True
+
+
+# Week 3: AI Assistant schemas
+class RunStepResponse(BaseModel):
+    id: int
+    step_number: int
+    step_type: str
+    description: str
+    tool_name: Optional[str] = None
+    tool_input: Optional[str] = None
+    tool_output: Optional[str] = None
+    status: str
+    error_message: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RunResponse(BaseModel):
+    id: int
+    conversation_id: int
+    user_message: str
+    status: str
+    assistant_response: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    steps: List[RunStepResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationResponse(BaseModel):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    runs: List[RunResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    conversation_id: Optional[int] = None
