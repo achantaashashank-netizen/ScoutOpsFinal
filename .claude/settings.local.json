@@ -18,7 +18,21 @@
       "Bash(docker-compose down:*)",
       "Bash(curl:*)",
       "Bash(timeout 60 docker-compose logs:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(timeout 30 docker-compose logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(timeout 10 docker-compose logs:*)",
+      "Bash(timeout 20 docker-compose logs:*)",
+      "Bash(timeout 45 curl:*)",
+      "Bash(timeout 60 curl:*)",
+      "Bash(docker-compose exec backend python:*)",
+      "Bash(docker-compose exec backend grep:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(docker volume:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker run:*)"
     ]
   }
 }

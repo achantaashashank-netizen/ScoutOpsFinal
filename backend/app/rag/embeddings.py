@@ -1,6 +1,9 @@
 from sentence_transformers import SentenceTransformer
 from typing import List
 from functools import lru_cache
+from sqlalchemy.orm import Session
+from app import models
+from app.rag.vector_store import upsert_note_embedding
 
 
 # Global model cache
@@ -36,6 +39,39 @@ def generate_embedding(text: str) -> List[float]:
     model = get_embedding_model()
     embedding = model.encode(text, convert_to_tensor=False)
     return embedding.tolist()
+
+
+def store_note_embedding(note: models.Note, db: Session) -> bool:
+    """
+    Generate and store a note's embedding in Qdrant vector database.
+
+    Args:
+        note: Note object to process
+        db: Database session (to access player relationship)
+
+    Returns:
+        bool: True if successful
+    """
+    # Generate embedding from title + content
+    combined_text = f"{note.title} {note.content}"
+    embedding = generate_embedding(combined_text)
+
+    # Get player info (refresh if needed)
+    if not note.player:
+        db.refresh(note)
+
+    # Store in Qdrant
+    return upsert_note_embedding(
+        note_id=note.id,
+        embedding=embedding,
+        player_id=note.player_id,
+        player_name=note.player.name,
+        team=note.player.team or "",
+        title=note.title,
+        content=note.content,
+        tags=note.tags,
+        game_date=note.game_date
+    )
 
 
 def generate_text_searchable(title: str, content: str, tags: str = "") -> str:

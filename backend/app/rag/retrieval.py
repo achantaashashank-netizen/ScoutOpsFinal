@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 from app import models
 from app.rag.schemas import NoteSnippet
 from app.rag.embeddings import get_embedding_model
+from app.rag.vector_store import search_similar_notes
 
 
 def retrieve_notes(
@@ -17,6 +18,8 @@ def retrieve_notes(
 ) -> List[NoteSnippet]:
     """
     Retrieve relevant notes using hybrid search (keyword + semantic).
+
+    Now uses Qdrant for semantic search instead of PostgreSQL arrays.
 
     Args:
         query: Search query
@@ -34,11 +37,11 @@ def retrieve_notes(
     model = get_embedding_model()
     query_embedding = model.encode(query, convert_to_tensor=False).tolist()
 
-    # Perform keyword search
+    # Perform keyword search (PostgreSQL full-text search)
     keyword_results = _keyword_search(query, db, player_id, team)
 
-    # Perform semantic search
-    semantic_results = _semantic_search(query_embedding, db, player_id, team)
+    # Perform semantic search (Qdrant vector database)
+    semantic_results = _semantic_search_qdrant(query_embedding, player_id, team)
 
     # Combine scores
     combined = _combine_scores(
@@ -54,18 +57,18 @@ def retrieve_notes(
     # Format as NoteSnippet
     snippets = []
     for result in ranked:
-        note = result['note']
+        note_data = result['note_data']
         snippets.append(NoteSnippet(
-            note_id=note.id,
-            player_id=note.player_id,
-            player_name=note.player.name,
-            title=note.title,
-            excerpt=_create_excerpt(note.content, query),
+            note_id=note_data['note_id'],
+            player_id=note_data['player_id'],
+            player_name=note_data['player_name'],
+            title=note_data['title'],
+            excerpt=_create_excerpt(note_data['content'], query),
             relevance_score=result['final_score'],
             keyword_score=result['keyword_score'],
             semantic_score=result['semantic_score'],
-            game_date=note.game_date,
-            tags=note.tags
+            game_date=note_data.get('game_date'),
+            tags=note_data.get('tags')
         ))
 
     return snippets
@@ -76,9 +79,10 @@ def _keyword_search(
     db: Session,
     player_id: Optional[int],
     team: Optional[str]
-) -> List[Tuple[models.Note, float]]:
+) -> List[Tuple[dict, float]]:
     """
     PostgreSQL full-text search using ts_rank.
+    Returns list of (note_data_dict, score) tuples.
     """
     ts_query = func.plainto_tsquery('english', query)
 
@@ -97,90 +101,117 @@ def _keyword_search(
         query_obj = query_obj.filter(models.Player.team.ilike(f"%{team}%"))
 
     results = query_obj.all()
-    return [(note, float(rank)) for note, rank in results]
+
+    # Convert to dict format
+    formatted_results = []
+    for note, rank in results:
+        note_data = {
+            'note_id': note.id,
+            'player_id': note.player_id,
+            'player_name': note.player.name,
+            'team': note.player.team or "",
+            'title': note.title,
+            'content': note.content,
+            'tags': note.tags,
+            'game_date': note.game_date
+        }
+        formatted_results.append((note_data, float(rank)))
+
+    return formatted_results
 
 
-def _semantic_search(
+def _semantic_search_qdrant(
     query_embedding: List[float],
-    db: Session,
     player_id: Optional[int],
-    team: Optional[str]
-) -> List[Tuple[models.Note, float]]:
+    team: Optional[str],
+    top_k: int = 20
+) -> List[Tuple[dict, float]]:
     """
-    Vector similarity search using PostgreSQL array operations (no pgvector needed).
-    Computes cosine similarity manually using SQL.
+    Vector similarity search using Qdrant.
+    Returns list of (note_data_dict, score) tuples.
+
+    Args:
+        query_embedding: Query vector
+        player_id: Optional player filter
+        team: Optional team filter
+        top_k: Number of results to fetch
+
+    Returns:
+        List of (note_data_dict, cosine_similarity_score) tuples
     """
-    import numpy as np
+    # Search in Qdrant (handles filtering internally)
+    results = search_similar_notes(
+        query_embedding=query_embedding,
+        player_id=player_id,
+        team=team,
+        top_k=top_k
+    )
 
-    # Fetch all notes with embeddings
-    query_obj = db.query(models.Note).filter(
-        models.Note.embedding.is_not(None)
-    ).join(models.Player)
+    # Convert to expected format
+    formatted_results = []
+    for result in results:
+        note_data = {
+            'note_id': result['note_id'],
+            'player_id': result['player_id'],
+            'player_name': result['player_name'],
+            'team': result['team'],
+            'title': result['title'],
+            'content': result['content'],
+            'tags': result['tags'],
+            'game_date': result['game_date']
+        }
+        # Qdrant returns cosine similarity (0-1), higher is better
+        formatted_results.append((note_data, result['score']))
 
-    # Apply filters
-    if player_id:
-        query_obj = query_obj.filter(models.Note.player_id == player_id)
-    if team:
-        query_obj = query_obj.filter(models.Player.team.ilike(f"%{team}%"))
-
-    notes = query_obj.all()
-
-    # Calculate cosine similarity in Python
-    results = []
-    query_emb = np.array(query_embedding)
-    query_norm = np.linalg.norm(query_emb)
-
-    for note in notes:
-        if note.embedding and len(note.embedding) == len(query_embedding):
-            note_emb = np.array(note.embedding)
-            note_norm = np.linalg.norm(note_emb)
-
-            if note_norm > 0 and query_norm > 0:
-                # Cosine similarity = dot product / (norm1 * norm2)
-                similarity = np.dot(query_emb, note_emb) / (query_norm * note_norm)
-                results.append((note, float(similarity)))
-
-    # Sort by similarity (descending) and limit to top 20
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results[:20]
+    return formatted_results
 
 
 def _combine_scores(
-    keyword_results: List[Tuple[models.Note, float]],
-    semantic_results: List[Tuple[models.Note, float]],
+    keyword_results: List[Tuple[dict, float]],
+    semantic_results: List[Tuple[dict, float]],
     keyword_weight: float,
     semantic_weight: float
 ) -> List[dict]:
     """
     Normalize and combine keyword and semantic scores.
+
+    Args:
+        keyword_results: List of (note_data_dict, score) from keyword search
+        semantic_results: List of (note_data_dict, score) from semantic search
+        keyword_weight: Weight for keyword scoring (0-1)
+        semantic_weight: Weight for semantic scoring (0-1)
+
+    Returns:
+        List of dicts with combined scores
     """
     # Normalize keyword scores to [0, 1]
     if keyword_results:
         max_kw = max(score for _, score in keyword_results) if keyword_results else 1.0
-        kw_dict = {note.id: (note, score / max_kw if max_kw > 0 else 0.0)
-                   for note, score in keyword_results}
+        kw_dict = {note_data['note_id']: (note_data, score / max_kw if max_kw > 0 else 0.0)
+                   for note_data, score in keyword_results}
     else:
         kw_dict = {}
 
-    # Semantic scores are already in [0, 1] (cosine similarity)
-    sem_dict = {note.id: (note, score) for note, score in semantic_results}
+    # Semantic scores from Qdrant are already in [0, 1] (cosine similarity)
+    sem_dict = {note_data['note_id']: (note_data, score)
+                for note_data, score in semantic_results}
 
     # Combine all note IDs
     all_note_ids = set(kw_dict.keys()) | set(sem_dict.keys())
 
     combined = []
     for note_id in all_note_ids:
-        kw_note, kw_score = kw_dict.get(note_id, (None, 0.0))
-        sem_note, sem_score = sem_dict.get(note_id, (None, 0.0))
+        kw_note_data, kw_score = kw_dict.get(note_id, (None, 0.0))
+        sem_note_data, sem_score = sem_dict.get(note_id, (None, 0.0))
 
-        # Get note object (prefer from keyword results, then semantic)
-        note = kw_note if kw_note else sem_note
+        # Get note data (prefer from keyword results, then semantic)
+        note_data = kw_note_data if kw_note_data else sem_note_data
 
         # Calculate final score
         final_score = (keyword_weight * kw_score) + (semantic_weight * sem_score)
 
         combined.append({
-            'note': note,
+            'note_data': note_data,
             'final_score': final_score,
             'keyword_score': kw_score,
             'semantic_score': sem_score

@@ -19,6 +19,7 @@ function Layout({ children }: LayoutProps) {
             <nav className="nav">
               <Link to="/" className="nav-link">Players</Link>
               <Link to="/ask" className="nav-link">Ask ScoutOps</Link>
+              <Link to="/assistant" className="nav-link">AI Assistant</Link>
             </nav>
           </div>
         </div>
